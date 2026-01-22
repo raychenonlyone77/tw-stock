@@ -2,38 +2,60 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>台股 20 日 K 線與真振幅監控</title>
+    <title>週選結算與台積電位能監控</title>
     <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #0f172a; color: #f1f5f9; padding: 20px; text-align: center; }
-        .container { max-width: 1000px; margin: auto; }
-        .card { background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; }
-        h2 { color: #38bdf8; margin-bottom: 15px; }
-        .loading { font-size: 18px; color: #38bdf8; font-weight: bold; margin: 20px 0; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
-        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #334155; }
+        body { font-family: sans-serif; background: #020617; color: #f1f5f9; padding: 20px; text-align: center; }
+        .container { max-width: 1200px; margin: auto; }
+        .grid { display: grid; grid-template-columns: 2.5fr 1fr; gap: 20px; margin-bottom: 20px; }
+        .card { background: #1e293b; padding: 20px; border-radius: 12px; border: 1px solid #334155; }
+        h2 { color: #38bdf8; margin-top: 0; }
+        .stat-box { text-align: left; padding: 15px; background: #0f172a; border-radius: 8px; margin-bottom: 12px; }
+        .stat-title { color: #94a3b8; font-size: 13px; }
+        .stat-value { font-size: 22px; font-weight: bold; color: #38bdf8; }
+        .tsmc-up { color: #f43f5e; }
+        .tsmc-down { color: #10b981; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px; border-bottom: 1px solid #334155; }
         th { background: #334155; color: #94a3b8; }
-        .trend-high { color: #f43f5e; font-weight: bold; }
-        .trend-mid { color: #fbbf24; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🚀 台股 20 日 K 線與真振幅監控</h2>
-        <p id="status" class="loading">📡 正在同步 K 線數據...</p>
+        <h2>🚀 台股週選與台積電位能監控</h2>
         
-        <div class="card"><div id="klineChart"></div></div>
+        <div class="grid">
+            <div class="card"><div id="mainChart"></div></div>
+            
+            <div class="card">
+                <div class="stat-box">
+                    <div class="stat-title">台積電 (2330) 最新收盤</div>
+                    <div id="tsmcPrice" class="stat-value">--</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-title">台積電 今日漲跌幅</div>
+                    <div id="tsmcChange" class="stat-value">--</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-title">🚩 週選預估結算區間</div>
+                    <div id="optionRange" class="stat-value" style="font-size: 17px; color: #fbbf24;">讀取中...</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-title">大盤 20 日平均真振幅</div>
+                    <div id="avgTR" class="stat-value">--</div>
+                </div>
+            </div>
+        </div>
 
         <div class="card">
             <table>
                 <thead>
                     <tr>
                         <th>日期</th>
-                        <th>開 / 收</th>
-                        <th>高 / 低</th>
-                        <th>真振幅 (點)</th>
-                        <th>真振幅 %</th>
+                        <th>指數開 / 收</th>
+                        <th>台積電收盤</th>
+                        <th>真振幅 % (能量)</th>
                     </tr>
                 </thead>
                 <tbody id="tableBody"></tbody>
@@ -42,86 +64,82 @@
     </div>
 
     <script>
-        // 您的 CSV 連結
-        const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSQJGbsyoKWvG2hBanT7LaFGlBI4yC-ZsXR2y1L0ltN2T2U3HfCx2Pef2WM0IDKiw1hCcGItpkq-ZG3/pub?output=csv'; 
+        const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSag_B3U7jBPI6LmPAMsSxJcugKVpr6dlIyQ3wiFKXFb9shVbPRpsyy8LbAB7rWMTmKlIfUMzHpRBfS/pub?output=csv';
 
         async function fetchTradingData() {
             Papa.parse(csvUrl, {
                 download: true,
                 header: true,
                 skipEmptyLines: true,
-                complete: function(results) {
-                    if (results.data && results.data.length > 0) {
-                        processData(results.data);
-                    }
-                }
+                complete: function(results) { processData(results.data); }
             });
         }
 
         function processData(raw) {
-            let chartData = [];
-            let tableRecords = [];
+            let ohlc = [];
+            let tsmcData = [];
+            let records = [];
+            let totalTR = 0;
 
             for (let i = 0; i < Math.min(21, raw.length - 1); i++) {
-                let curr = raw[i];
-                let prev = raw[i + 1];
+                let curr = raw[i], prev = raw[i+1];
+                let o = parseFloat(curr.Open), h = parseFloat(curr.High), l = parseFloat(curr.Low), c = parseFloat(curr.Close), pc = parseFloat(prev.Close);
+                let tsmcC = parseFloat(curr.Close_1 || curr['Close'] || 0); // 假設台積電在 F 欄
 
-                // 抓取五個關鍵欄位
-                let o = parseFloat(curr.Open || curr.open);
-                let h = parseFloat(curr.High || curr.high);
-                let l = parseFloat(curr.Low || curr.low);
-                let c = parseFloat(curr.Close || curr.close);
-                let pc = parseFloat(prev.Close || prev.close);
-                let dateStr = curr.Date || curr.date || "";
+                if (isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c)) continue;
 
-                if (isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c) || isNaN(pc)) continue;
+                ohlc.push({ x: curr.Date.split(' ')[0], y: [o, h, l, c] });
+                tsmcData.push({ x: curr.Date.split(' ')[0], y: tsmcC });
 
-                // 準備 K 線圖格式
-                chartData.push({
-                    x: dateStr.split(' ')[0],
-                    y: [o, h, l, c] // 順序必須是: 開, 高, 低, 收
-                });
-
-                // 計算真振幅
                 let tr = Math.max(h, pc) - Math.min(l, pc);
-                let trPercent = ((tr / pc) * 100).toFixed(2);
+                let trPct = ((tr / pc) * 100).toFixed(2);
+                totalTR += tr;
 
-                tableRecords.push({ date: dateStr.split(' ')[0], o, c, h, l, tr, trPercent });
+                records.push({ date: curr.Date.split(' ')[0], o, c, h, l, trPct, tsmcC });
             }
 
-            renderChart(chartData.reverse());
-            renderTable(tableRecords);
-            document.getElementById('status').style.display = 'none';
+            // 更新面板資訊
+            const lastTSMC = records[0].tsmcC;
+            const prevTSMC = records[1].tsmcC;
+            const tsmcPct = (((lastTSMC - prevTSMC) / prevTSMC) * 100).toFixed(2);
+            const avgTR = totalTR / records.length;
+
+            document.getElementById('tsmcPrice').innerText = `${lastTSMC} TWD`;
+            document.getElementById('tsmcChange').innerText = `${tsmcPct}%`;
+            document.getElementById('tsmcChange').className = `stat-value ${tsmcPct >= 0 ? 'tsmc-up' : 'tsmc-down'}`;
+            document.getElementById('avgTR').innerText = Math.round(avgTR);
+            document.getElementById('optionRange').innerText = `${Math.round(records[0].c - avgTR)} ～ ${Math.round(records[0].c + avgTR)}`;
+
+            renderChart(ohlc.reverse(), tsmcData.reverse());
+            renderTable(records);
         }
 
-        function renderChart(data) {
-            const options = {
-                series: [{ data: data }],
-                chart: { type: 'candlestick', height: 350, toolbar: { show: false }, background: '#1e293b' },
+        function renderChart(ohlc, tsmc) {
+            new ApexCharts(document.querySelector("#mainChart"), {
+                series: [
+                    { name: '大盤 K 線', type: 'candlestick', data: ohlc },
+                    { name: '台積電走勢', type: 'line', data: tsmc }
+                ],
+                chart: { height: 400, toolbar: { show: false } },
                 theme: { mode: 'dark' },
-                xaxis: { type: 'category', labels: { style: { colors: '#94a3b8' } } },
-                yaxis: { tooltip: { enabled: true }, labels: { style: { colors: '#94a3b8' } } },
-                plotOptions: {
-                    candlestick: {
-                        colors: { upward: '#f43f5e', downward: '#10b981' }, // 紅漲綠跌 (台股習慣)
-                        wick: { useFillColor: true }
-                    }
-                }
-            };
-            const chart = new ApexCharts(document.querySelector("#klineChart"), options);
-            chart.render();
+                stroke: { width: [1, 3] },
+                yaxis: [
+                    { title: { text: '加權指數' }, labels: { style: { colors: '#94a3b8' } } },
+                    { opposite: true, title: { text: '台積電價格' }, labels: { style: { colors: '#38bdf8' } } }
+                ],
+                plotOptions: { candlestick: { colors: { upward: '#f43f5e', downward: '#10b981' } } },
+                grid: { borderColor: '#334155' }
+            }).render();
         }
 
         function renderTable(data) {
             const body = document.getElementById('tableBody');
             data.forEach(d => {
-                let colorClass = d.trPercent >= 1.5 ? 'trend-high' : (d.trPercent >= 0.8 ? 'trend-mid' : '');
                 body.innerHTML += `<tr>
                     <td>${d.date}</td>
-                    <td>${d.o.toFixed(0)} / ${d.c.toFixed(0)}</td>
-                    <td>${d.h.toFixed(0)} / ${d.l.toFixed(0)}</td>
-                    <td>${Math.round(d.tr)}</td>
-                    <td class="${colorClass}">${d.trPercent}%</td>
+                    <td>${Math.round(d.o)} / ${Math.round(d.c)}</td>
+                    <td>${d.tsmcC}</td>
+                    <td class="${d.trPct >= 1.5 ? 'tsmc-up' : ''}">${d.trPct}%</td>
                 </tr>`;
             });
         }
@@ -130,5 +148,4 @@
     </script>
 </body>
 </html>
-
 
