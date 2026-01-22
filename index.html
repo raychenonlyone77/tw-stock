@@ -2,36 +2,36 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>台股 20 日真振幅自動監控</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <title>台股 20 日 K 線與真振幅監控</title>
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
     <style>
         body { font-family: sans-serif; background: #0f172a; color: #f1f5f9; padding: 20px; text-align: center; }
-        .container { max-width: 900px; margin: auto; }
-        .card { background: #1e293b; padding: 25px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; }
-        h2 { color: #38bdf8; margin-bottom: 10px; }
+        .container { max-width: 1000px; margin: auto; }
+        .card { background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; }
+        h2 { color: #38bdf8; margin-bottom: 15px; }
         .loading { font-size: 18px; color: #38bdf8; font-weight: bold; margin: 20px 0; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
         th, td { padding: 12px; text-align: center; border-bottom: 1px solid #334155; }
         th { background: #334155; color: #94a3b8; }
-        .trend-high { color: #f43f5e; font-weight: bold; } /* 1.5% 以上 */
-        .trend-mid { color: #fbbf24; } /* 0.8% 以上 */
+        .trend-high { color: #f43f5e; font-weight: bold; }
+        .trend-mid { color: #fbbf24; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>🚀 台股 20 日真振幅自動監控儀表板</h2>
-        <p id="status" class="loading">📡 正在從 Google 試算表同步數據...</p>
+        <h2>🚀 台股 20 日 K 線與真振幅監控</h2>
+        <p id="status" class="loading">📡 正在同步 K 線數據...</p>
         
-        <div class="card"><canvas id="ampChart" height="120"></canvas></div>
+        <div class="card"><div id="klineChart"></div></div>
 
         <div class="card">
             <table>
                 <thead>
                     <tr>
                         <th>日期</th>
-                        <th>昨收</th>
-                        <th>今日高 / 低</th>
+                        <th>開 / 收</th>
+                        <th>高 / 低</th>
                         <th>真振幅 (點)</th>
                         <th>真振幅 %</th>
                     </tr>
@@ -42,104 +42,87 @@
     </div>
 
     <script>
-        // 正確的 CSV 網址
-        const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSYf-itCb_WbNQ5cbeI3POxCmuHiFflcc9fGdYEVtnaMNZPsf8PbbzQojuehVnzhXZnKacrff9kvFyk/pub?output=csv'; 
+        // 您的 CSV 連結
+        const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSQJGbsyoKWvG2hBanT7LaFGlBI4yC-ZsXR2y1L0ltN2T2U3HfCx2Pef2WM0IDKiw1hCcGItpkq-ZG3/pub?output=csv'; 
 
         async function fetchTradingData() {
-            try {
-                Papa.parse(csvUrl, {
-                    download: true,
-                    header: true,
-                    skipEmptyLines: true,
-                    transformHeader: h => h.trim(), // 自動清除標題前後空格
-                    complete: function(results) {
-                        console.log("抓取到的標題為:", results.meta.fields); // 供診錯使用
-                        if (results.data && results.data.length > 0) {
-                            processTradingData(results.data);
-                        } else {
-                            document.getElementById('status').innerText = "❌ 試算表發佈成功但內部無數據";
-                        }
-                    },
-                    error: function() {
-                        document.getElementById('status').innerText = "❌ CSV 讀取失敗，請確認試算表已發佈";
+            Papa.parse(csvUrl, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    if (results.data && results.data.length > 0) {
+                        processData(results.data);
                     }
-                });
-            } catch (error) {
-                document.getElementById('status').innerText = "❌ 網路連線錯誤";
-            }
+                }
+            });
         }
 
-        function processTradingData(raw) {
-            let records = [];
+        function processData(raw) {
+            let chartData = [];
+            let tableRecords = [];
+
             for (let i = 0; i < Math.min(21, raw.length - 1); i++) {
                 let curr = raw[i];
                 let prev = raw[i + 1];
 
-                // 強化版：不論大小寫都嘗試讀取
-                let h = parseFloat(curr.High || curr.high || curr['最高價'] || curr['最高']);
-                let l = parseFloat(curr.Low || curr.low || curr['最低價'] || curr['最低']);
-                let pc = parseFloat(prev.Close || prev.close || prev['收盤價'] || prev['收盤']);
-                let dateStr = curr.Date || curr.date || curr['日期'] || "";
+                // 抓取五個關鍵欄位
+                let o = parseFloat(curr.Open || curr.open);
+                let h = parseFloat(curr.High || curr.high);
+                let l = parseFloat(curr.Low || curr.low);
+                let c = parseFloat(curr.Close || curr.close);
+                let pc = parseFloat(prev.Close || prev.close);
+                let dateStr = curr.Date || curr.date || "";
 
-                if (isNaN(h) || isNaN(l) || isNaN(pc)) continue;
+                if (isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c) || isNaN(pc)) continue;
 
-                // 真振幅 % 計算公式
-                let trueHigh = Math.max(h, pc);
-                let trueLow = Math.min(l, pc);
-                let tr = trueHigh - trueLow;
+                // 準備 K 線圖格式
+                chartData.push({
+                    x: dateStr.split(' ')[0],
+                    y: [o, h, l, c] // 順序必須是: 開, 高, 低, 收
+                });
+
+                // 計算真振幅
+                let tr = Math.max(h, pc) - Math.min(l, pc);
                 let trPercent = ((tr / pc) * 100).toFixed(2);
-                let date = dateStr.split(' ')[0];
 
-                records.push({ date, pc, h, l, tr, trPercent });
+                tableRecords.push({ date: dateStr.split(' ')[0], o, c, h, l, tr, trPercent });
             }
 
-            if (records.length > 0) {
-                display(records);
-            } else {
-                document.getElementById('status').innerText = "❌ 數據解析失敗，請確認試算表首列為英文標題";
-            }
+            renderChart(chartData.reverse());
+            renderTable(tableRecords);
+            document.getElementById('status').style.display = 'none';
         }
 
-        function display(data) {
-            document.getElementById('status').style.display = 'none';
+        function renderChart(data) {
+            const options = {
+                series: [{ data: data }],
+                chart: { type: 'candlestick', height: 350, toolbar: { show: false }, background: '#1e293b' },
+                theme: { mode: 'dark' },
+                xaxis: { type: 'category', labels: { style: { colors: '#94a3b8' } } },
+                yaxis: { tooltip: { enabled: true }, labels: { style: { colors: '#94a3b8' } } },
+                plotOptions: {
+                    candlestick: {
+                        colors: { upward: '#f43f5e', downward: '#10b981' }, // 紅漲綠跌 (台股習慣)
+                        wick: { useFillColor: true }
+                    }
+                }
+            };
+            const chart = new ApexCharts(document.querySelector("#klineChart"), options);
+            chart.render();
+        }
+
+        function renderTable(data) {
             const body = document.getElementById('tableBody');
-            body.innerHTML = '';
-            
             data.forEach(d => {
                 let colorClass = d.trPercent >= 1.5 ? 'trend-high' : (d.trPercent >= 0.8 ? 'trend-mid' : '');
                 body.innerHTML += `<tr>
                     <td>${d.date}</td>
-                    <td>${Math.round(d.pc)}</td>
-                    <td>${Math.round(d.h)} / ${Math.round(d.l)}</td>
+                    <td>${d.o.toFixed(0)} / ${d.c.toFixed(0)}</td>
+                    <td>${d.h.toFixed(0)} / ${d.l.toFixed(0)}</td>
                     <td>${Math.round(d.tr)}</td>
                     <td class="${colorClass}">${d.trPercent}%</td>
                 </tr>`;
-            });
-            drawChart(data);
-        }
-
-        function drawChart(data) {
-            const ctx = document.getElementById('ampChart').getContext('2d');
-            const sorted = [...data].reverse();
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: sorted.map(d => d.date.slice(5)),
-                    datasets: [{
-                        label: '每日真振幅 %',
-                        data: sorted.map(d => d.trPercent),
-                        backgroundColor: sorted.map(d => d.trPercent >= 1.5 ? '#f43f5e' : (d.trPercent >= 0.8 ? '#fbbf24' : '#38bdf8')),
-                        borderRadius: 5
-                    }]
-                },
-                options: { 
-                    responsive: true,
-                    scales: { 
-                        y: { beginAtZero: true, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
-                        x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
-                    },
-                    plugins: { legend: { display: false } }
-                }
             });
         }
 
@@ -147,4 +130,5 @@
     </script>
 </body>
 </html>
+
 
