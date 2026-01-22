@@ -21,7 +21,7 @@
 <body>
     <div class="container">
         <h2>🚀 台股 20 日真振幅自動監控儀表板</h2>
-        <p id="status" class="loading">📡 數據抓取中，請稍候...</p>
+        <p id="status" class="loading">📡 數據抓取中...</p>
         
         <div class="card"><canvas id="ampChart" height="120"></canvas></div>
 
@@ -42,7 +42,7 @@
     </div>
 
     <script>
-        // 已修正：使用你最新截圖中的正確 CSV 連結
+        // 核心更新：使用你截圖中正確的 QjQ 結尾連結
         const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRnnycTiC2j4aZnKmJbN2KsdOfAl1lQe77SsaMede4h6w64XaXWA9IlvsvsqVxNl1XlVwkszhOfQjQ/pub?output=csv'; 
 
         async function fetchTradingData() {
@@ -59,7 +59,7 @@
                         }
                     },
                     error: function() {
-                        document.getElementById('status').innerText = "❌ 無法讀取 CSV，請確認 GitHub Pages 是否部署完成";
+                        document.getElementById('status').innerText = "❌ 無法讀取 CSV，請等待 1 分鐘後重新整理";
                     }
                 });
             } catch (error) {
@@ -69,12 +69,10 @@
 
         function processTradingData(raw) {
             let records = [];
-            // 只抓取最近 21 筆以計算 20 天的真振幅 (需前一日收盤價)
             for (let i = 0; i < Math.min(21, raw.length - 1); i++) {
                 let current = raw[i];
                 let prev = raw[i + 1];
 
-                // 根據你截圖中的英文標題進行抓取
                 let h = parseFloat(current.High);
                 let l = parseFloat(current.Low);
                 let pc = parseFloat(prev.Close);
@@ -82,7 +80,6 @@
 
                 if (isNaN(h) || isNaN(l) || isNaN(pc)) continue;
 
-                // 真振幅公式: max(今日高, 昨收) - min(今日低, 昨收)
                 let trueHigh = Math.max(h, pc);
                 let trueLow = Math.min(l, pc);
                 let tr = trueHigh - trueLow;
@@ -95,7 +92,7 @@
             if (records.length > 0) {
                 display(records);
             } else {
-                document.getElementById('status').innerText = "❌ 數據格式解析失敗，請確認欄位名稱為 Date, High, Low, Close";
+                document.getElementById('status').innerText = "❌ 數據格式不符，請確認試算表標題為 Date, High, Low, Close";
             }
         }
 
