@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>台股 20 日真振幅自動監控</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        body { font-family: sans-serif; background: #0f172a; color: #f1f5f9; padding: 20px; text-align: center; }
+        .container { max-width: 900px; margin: auto; }
+        .card { background: #1e293b; padding: 25px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; }
+        h2 { color: #38bdf8; margin-bottom: 10px; }
+        .loading { font-size: 18px; color: #38bdf8; font-weight: bold; margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #334155; }
+        th { background: #334155; color: #94a3b8; }
+        .trend-high { color: #f43f5e; font-weight: bold; } /* 1.5% 以上 */
+        .trend-mid { color: #fbbf24; } /* 0.8% 以上 */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>🚀 台股 20 日真振幅自動監控儀表板</h2>
+        <p id="status" class="loading">📡 數據抓取中，請稍候...</p>
+        
+        <div class="card"><canvas id="ampChart" height="120"></canvas></div>
+
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>日期</th>
+                        <th>昨收</th>
+                        <th>今日高 / 低</th>
+                        <th>真振幅 (點)</th>
+                        <th>真振幅 %</th>
+                    </tr>
+                </thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // 已修正：使用你最新截圖中的正確 CSV 連結
+        const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRnnycTiC2j4aZnKmJbN2KsdOfAl1lQe77SsaMede4h6w64XaXWA9IlvsvsqVxNl1XlVwkszhOfQjQ/pub?output=csv'; 
+
+        async function fetchTradingData() {
+            try {
+                Papa.parse(csvUrl, {
+                    download: true,
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        if (results.data && results.data.length > 0) {
+                            processTradingData(results.data);
+                        } else {
+                            document.getElementById('status').innerText = "❌ 試算表內無數據，請檢查公式";
+                        }
+                    },
+                    error: function() {
+                        document.getElementById('status').innerText = "❌ 無法讀取 CSV，請確認 GitHub Pages 是否部署完成";
+                    }
+                });
+            } catch (error) {
+                document.getElementById('status').innerText = "❌ 網路連線錯誤";
+            }
+        }
+
+        function processTradingData(raw) {
+            let records = [];
+            // 只抓取最近 21 筆以計算 20 天的真振幅 (需前一日收盤價)
+            for (let i = 0; i < Math.min(21, raw.length - 1); i++) {
+                let current = raw[i];
+                let prev = raw[i + 1];
+
+                // 根據你截圖中的英文標題進行抓取
+                let h = parseFloat(current.High);
+                let l = parseFloat(current.Low);
+                let pc = parseFloat(prev.Close);
+                let dateStr = current.Date || "";
+
+                if (isNaN(h) || isNaN(l) || isNaN(pc)) continue;
+
+                // 真振幅公式: max(今日高, 昨收) - min(今日低, 昨收)
+                let trueHigh = Math.max(h, pc);
+                let trueLow = Math.min(l, pc);
+                let tr = trueHigh - trueLow;
+                let trPercent = ((tr / pc) * 100).toFixed(2);
+                let date = dateStr.split(' ')[0];
+
+                records.push({ date, pc, h, l, tr, trPercent });
+            }
+
+            if (records.length > 0) {
+                display(records);
+            } else {
+                document.getElementById('status').innerText = "❌ 數據格式解析失敗，請確認欄位名稱為 Date, High, Low, Close";
+            }
+        }
+
+        function display(data) {
+            document.getElementById('status').style.display = 'none';
+            const body = document.getElementById('tableBody');
+            body.innerHTML = '';
+            
+            data.forEach(d => {
+                let colorClass = d.trPercent >= 1.5 ? 'trend-high' : (d.trPercent >= 0.8 ? 'trend-mid' : '');
+                body.innerHTML += `<tr>
+                    <td>${d.date}</td>
+                    <td>${d.pc.toFixed(0)}</td>
+                    <td>${d.h.toFixed(0)} / ${d.l.toFixed(0)}</td>
+                    <td>${d.tr.toFixed(0)}</td>
+                    <td class="${colorClass}">${d.trPercent}%</td>
+                </tr>`;
+            });
+            drawChart(data);
+        }
+
+        function drawChart(data) {
+            const ctx = document.getElementById('ampChart').getContext('2d');
+            const sorted = [...data].reverse();
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: sorted.map(d => d.date.slice(5)),
+                    datasets: [{
+                        label: '每日真振幅 %',
+                        data: sorted.map(d => d.trPercent),
+                        backgroundColor: sorted.map(d => d.trPercent >= 1.5 ? '#f43f5e' : (d.trPercent >= 0.8 ? '#fbbf24' : '#38bdf8')),
+                        borderRadius: 5
+                    }]
+                },
+                options: { 
+                    responsive: true,
+                    scales: { 
+                        y: { beginAtZero: true, grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8' } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        }
+
+        fetchTradingData();
+    </script>
+</body>
+</html>
