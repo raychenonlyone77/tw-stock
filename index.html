@@ -21,7 +21,7 @@
 <body>
     <div class="container">
         <h2>🚀 台股 20 日真振幅自動監控儀表板</h2>
-        <p id="status" class="loading">📡 數據抓取中...</p>
+        <p id="status" class="loading">📡 正在從 Google 試算表同步數據...</p>
         
         <div class="card"><canvas id="ampChart" height="120"></canvas></div>
 
@@ -42,8 +42,8 @@
     </div>
 
     <script>
-        // 核心更新：使用你截圖中正確的 QjQ 結尾連結
-       const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRnnycTiC2j4aZnKmJbN2KsdOfAl1lQe77SsaMede4h6w64XaXWA9IlvsvsqVxNl1XlVwkszhOfQjQ/pub?output=csv';
+        // 正確的 CSV 網址
+        const csvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vRnnycTiC2j4aZnKmJbN2KsdOfAl1lQe77SsaMede4h6w64XaXWA9IlvsvsqVxNl1XlVwkszhOfQjQ/pub?output=csv'; 
 
         async function fetchTradingData() {
             try {
@@ -51,15 +51,17 @@
                     download: true,
                     header: true,
                     skipEmptyLines: true,
+                    transformHeader: h => h.trim(), // 自動清除標題前後空格
                     complete: function(results) {
+                        console.log("抓取到的標題為:", results.meta.fields); // 供診錯使用
                         if (results.data && results.data.length > 0) {
                             processTradingData(results.data);
                         } else {
-                            document.getElementById('status').innerText = "❌ 試算表內無數據，請檢查公式";
+                            document.getElementById('status').innerText = "❌ 試算表發佈成功但內部無數據";
                         }
                     },
                     error: function() {
-                        document.getElementById('status').innerText = "❌ 無法讀取 CSV，請等待 1 分鐘後重新整理";
+                        document.getElementById('status').innerText = "❌ CSV 讀取失敗，請確認試算表已發佈";
                     }
                 });
             } catch (error) {
@@ -70,16 +72,18 @@
         function processTradingData(raw) {
             let records = [];
             for (let i = 0; i < Math.min(21, raw.length - 1); i++) {
-                let current = raw[i];
+                let curr = raw[i];
                 let prev = raw[i + 1];
 
-                let h = parseFloat(current.High);
-                let l = parseFloat(current.Low);
-                let pc = parseFloat(prev.Close);
-                let dateStr = current.Date || "";
+                // 強化版：不論大小寫都嘗試讀取
+                let h = parseFloat(curr.High || curr.high || curr['最高價'] || curr['最高']);
+                let l = parseFloat(curr.Low || curr.low || curr['最低價'] || curr['最低']);
+                let pc = parseFloat(prev.Close || prev.close || prev['收盤價'] || prev['收盤']);
+                let dateStr = curr.Date || curr.date || curr['日期'] || "";
 
                 if (isNaN(h) || isNaN(l) || isNaN(pc)) continue;
 
+                // 真振幅 % 計算公式
                 let trueHigh = Math.max(h, pc);
                 let trueLow = Math.min(l, pc);
                 let tr = trueHigh - trueLow;
@@ -92,7 +96,7 @@
             if (records.length > 0) {
                 display(records);
             } else {
-                document.getElementById('status').innerText = "❌ 數據格式不符，請確認試算表標題為 Date, High, Low, Close";
+                document.getElementById('status').innerText = "❌ 數據解析失敗，請確認試算表首列為英文標題";
             }
         }
 
@@ -105,9 +109,9 @@
                 let colorClass = d.trPercent >= 1.5 ? 'trend-high' : (d.trPercent >= 0.8 ? 'trend-mid' : '');
                 body.innerHTML += `<tr>
                     <td>${d.date}</td>
-                    <td>${d.pc.toFixed(0)}</td>
-                    <td>${d.h.toFixed(0)} / ${d.l.toFixed(0)}</td>
-                    <td>${d.tr.toFixed(0)}</td>
+                    <td>${Math.round(d.pc)}</td>
+                    <td>${Math.round(d.h)} / ${Math.round(d.l)}</td>
+                    <td>${Math.round(d.tr)}</td>
                     <td class="${colorClass}">${d.trPercent}%</td>
                 </tr>`;
             });
@@ -143,4 +147,3 @@
     </script>
 </body>
 </html>
-
