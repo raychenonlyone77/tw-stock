@@ -27,22 +27,17 @@
         
         <div class="grid">
             <div class="card"><div id="mainChart"></div></div>
-            
             <div class="card">
                 <div class="stat-box">
                     <div class="stat-title">台積電 (2330) 最新收盤</div>
                     <div id="tsmcPrice" class="stat-value">--</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-title">台積電 今日漲跌幅</div>
-                    <div id="tsmcChange" class="stat-value">--</div>
-                </div>
-                <div class="stat-box">
                     <div class="stat-title">🚩 週選預估結算區間</div>
-                    <div id="optionRange" class="stat-value" style="font-size: 17px; color: #fbbf24;">讀取中...</div>
+                    <div id="optionRange" class="stat-value" style="font-size: 17px; color: #fbbf24;">計算中...</div>
                 </div>
                 <div class="stat-box">
-                    <div class="stat-title">大盤 20 日平均真振幅</div>
+                    <div class="stat-title">大盤 20 日平均真振幅 (點)</div>
                     <div id="avgTR" class="stat-value">--</div>
                 </div>
             </div>
@@ -53,7 +48,7 @@
                 <thead>
                     <tr>
                         <th>日期</th>
-                        <th>指數開 / 收</th>
+                        <th>指數開盤 / 收盤</th>
                         <th>台積電收盤</th>
                         <th>真振幅 % (能量)</th>
                     </tr>
@@ -69,46 +64,51 @@
         async function fetchTradingData() {
             Papa.parse(csvUrl, {
                 download: true,
-                header: true,
+                header: false, // 禁用標題讀取，改用數字抓欄位
                 skipEmptyLines: true,
-                complete: function(results) { processData(results.data); }
+                complete: function(results) { 
+                    // 略過第一列標題，從第二列開始處理
+                    processData(results.data.slice(1)); 
+                }
             });
         }
 
-        function processData(raw) {
+        function processData(data) {
             let ohlc = [];
             let tsmcData = [];
             let records = [];
             let totalTR = 0;
 
-            for (let i = 0; i < Math.min(21, raw.length - 1); i++) {
-                let curr = raw[i], prev = raw[i+1];
-                let o = parseFloat(curr.Open), h = parseFloat(curr.High), l = parseFloat(curr.Low), c = parseFloat(curr.Close), pc = parseFloat(prev.Close);
-                let tsmcC = parseFloat(curr.Close_1 || curr['Close'] || 0); // 假設台積電在 F 欄
+            for (let i = 0; i < Math.min(21, data.length - 1); i++) {
+                let curr = data[i], prev = data[i+1];
+                
+                // 固定欄位抓取
+                let dateStr = curr[0];
+                let o = parseFloat(curr[1]); // 大盤開盤
+                let h = parseFloat(curr[2]); // 大盤最高
+                let l = parseFloat(curr[3]); // 大盤最低
+                let c = parseFloat(curr[4]); // 大盤收盤
+                let tsmcC = parseFloat(curr[5]); // 台積電收盤
+                let pc = parseFloat(prev[4]); // 大盤昨收
 
                 if (isNaN(o) || isNaN(h) || isNaN(l) || isNaN(c)) continue;
 
-                ohlc.push({ x: curr.Date.split(' ')[0], y: [o, h, l, c] });
-                tsmcData.push({ x: curr.Date.split(' ')[0], y: tsmcC });
+                ohlc.push({ x: dateStr.split(' ')[0], y: [o, h, l, c] });
+                tsmcData.push({ x: dateStr.split(' ')[0], y: tsmcC });
 
                 let tr = Math.max(h, pc) - Math.min(l, pc);
                 let trPct = ((tr / pc) * 100).toFixed(2);
                 totalTR += tr;
 
-                records.push({ date: curr.Date.split(' ')[0], o, c, h, l, trPct, tsmcC });
+                records.push({ date: dateStr.split(' ')[0], o, c, h, l, tr, trPct, tsmcC });
             }
 
-            // 更新面板資訊
-            const lastTSMC = records[0].tsmcC;
-            const prevTSMC = records[1].tsmcC;
-            const tsmcPct = (((lastTSMC - prevTSMC) / prevTSMC) * 100).toFixed(2);
+            const lastRec = records[0];
             const avgTR = totalTR / records.length;
 
-            document.getElementById('tsmcPrice').innerText = `${lastTSMC} TWD`;
-            document.getElementById('tsmcChange').innerText = `${tsmcPct}%`;
-            document.getElementById('tsmcChange').className = `stat-value ${tsmcPct >= 0 ? 'tsmc-up' : 'tsmc-down'}`;
+            document.getElementById('tsmcPrice').innerText = `${lastRec.tsmcC} TWD`;
             document.getElementById('avgTR').innerText = Math.round(avgTR);
-            document.getElementById('optionRange').innerText = `${Math.round(records[0].c - avgTR)} ～ ${Math.round(records[0].c + avgTR)}`;
+            document.getElementById('optionRange').innerText = `${Math.round(lastRec.c - avgTR)} ～ ${Math.round(lastRec.c + avgTR)}`;
 
             renderChart(ohlc.reverse(), tsmcData.reverse());
             renderTable(records);
@@ -118,17 +118,16 @@
             new ApexCharts(document.querySelector("#mainChart"), {
                 series: [
                     { name: '大盤 K 線', type: 'candlestick', data: ohlc },
-                    { name: '台積電走勢', type: 'line', data: tsmc }
+                    { name: '台積電', type: 'line', data: tsmc }
                 ],
-                chart: { height: 400, toolbar: { show: false } },
+                chart: { height: 400, toolbar: { show: false }, background: 'transparent' },
                 theme: { mode: 'dark' },
-                stroke: { width: [1, 3] },
+                stroke: { width: [1, 2], curve: 'smooth' },
                 yaxis: [
-                    { title: { text: '加權指數' }, labels: { style: { colors: '#94a3b8' } } },
-                    { opposite: true, title: { text: '台積電價格' }, labels: { style: { colors: '#38bdf8' } } }
+                    { title: { text: '加權指數' }, labels: { formatter: v => v.toFixed(0) } },
+                    { opposite: true, title: { text: '台積電' } }
                 ],
-                plotOptions: { candlestick: { colors: { upward: '#f43f5e', downward: '#10b981' } } },
-                grid: { borderColor: '#334155' }
+                plotOptions: { candlestick: { colors: { upward: '#f43f5e', downward: '#10b981' } } }
             }).render();
         }
 
@@ -148,4 +147,5 @@
     </script>
 </body>
 </html>
+
 
